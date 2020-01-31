@@ -1,23 +1,57 @@
 ////////////////// VLM application ////////////////
- 
+
 // To-do
 //localstorage save state
 // Don't delete object, just disable it? the midi, the osc, the drawing of the spectrum
 
 var vlmApp = {};
- 
+
 vlmApp.init = function() {
     this.includeJavascript();
     this.audioIn.init();
 
     this.objects = [];
-    this.objects[0] = new vlmObject(0);
+    try {
+        var objects = localStorage && localStorage.getItem('objects');
+        if (typeof objects === 'string') {
+            objects = JSON.parse(objects);
+        }
+    } catch (e) {
+        console.error('Invalid JSON: ' + objects);
+    }
+    console.log(objects);
+    if (objects.length === 0) {
+        this.objects.push(new vlmObject(0));
+    } else {
+        objects.forEach(function(object, i) {
+            this.objects.push(new vlmObject(i, object));
+        }.bind(this));
+    }
 
     this.checkUserCapabilities();
-}
+};
+
+vlmApp.removeObject = function(index) {
+    vlmApp.objects = vlmApp.objects.filter(function(object) {
+        return object.index !== index;
+    });
+    vlmApp.saveState();
+};
+
+vlmApp.saveState = function() {
+    if (localStorage) {
+        console.log(vlmApp.objects);
+        localStorage.setItem('objects', JSON.stringify(vlmApp.objects, function( key, value) {
+            if( key == 'obj') { return value.id;}
+            else {return value;}
+        }));
+    } else {
+        console.error('Unable to save state!');
+    }
+};
 
 vlmApp.checkUserCapabilities = function() {
-    navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;    
+    navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
     if(navigator.getUserMedia == undefined || navigator.requestMIDIAccess == undefined) {
         $("#infoBox").dialog();
         $("#infoBox").css("display", "block");
@@ -64,7 +98,7 @@ vlmApp.getLastEnabledObject = function() {
 }
 
 ////////////////// vlmApp.audioIn //////////////////////////
-// Object caontaining everything related to the 
+// Object caontaining everything related to the
 // incoming audio
 
 vlmApp.audioIn = {
@@ -79,21 +113,21 @@ vlmApp.audioIn.init = function() {
     var audioInObj = this;
     if (typeof require == "function" || navigator.webkitGetUserMedia != undefined)
     {
-        navigator.webkitGetUserMedia({audio: true}, 
+        navigator.webkitGetUserMedia({audio: true},
             function(stream) {
                 audioInObj.createAudioNodes(stream)
             },
             function(err) {
-                    console.error(err);
+                console.error(err);
             }
         )
-   } else if (navigator.getUserMedia != undefined) {
-        navigator.getUserMedia({audio: true}, 
+    } else if (navigator.getUserMedia != undefined) {
+        navigator.getUserMedia({audio: true},
             function(stream) {
                 audioInObj.createAudioNodes(stream)
             },
-           function(err) {
-                    console.error(err);
+            function(err) {
+                console.error(err);
             }
         );
     }
@@ -104,7 +138,7 @@ vlmApp.audioIn.analyseAudio = function() {
     this.analyser.smoothingTimeConstant = this.timeSmooth;
     // bincount is fftsize / 2
     this.analyser.getByteFrequencyData(this.freqArray);
-    
+
     for (var i in vlmApp.objects) {
         if (vlmApp.objects[i].enabled) {
             vlmApp.objects[i].spectrum.drawSpectrum(this.freqArray);
@@ -117,16 +151,17 @@ vlmApp.audioIn.analyseAudio = function() {
 }
 
 vlmApp.audioIn.createAudioNodes = function(stream) {
-    this.audioContext = new AudioContext();
+    window.AudioContext = window.AudioContext || window.webkitAudioContext;
+    this.audioContext = new window.AudioContext();
     this.analyser = this.audioContext.createAnalyser();
     //analyser.fftSize = 256;
 
 
     this.microphone = this.audioContext.createMediaStreamSource(stream);
     this.microphone.connect(this.analyser);
-    
-     // setup a javascript node
-     // This will create a ScriptProcessor that is called whenever the 2048 frames have been sampled. Since our data is sampled at 44.1k, this function will be called approximately 21 times a second. 
+
+    // setup a javascript node
+    // This will create a ScriptProcessor that is called whenever the 2048 frames have been sampled. Since our data is sampled at 44.1k, this function will be called approximately 21 times a second.
     this.javascriptNode = this.audioContext.createScriptProcessor(2048, 1, 1);
     this.analyser.connect(this.javascriptNode);
     this.javascriptNode.connect(this.audioContext.destination);
@@ -138,37 +173,40 @@ vlmApp.audioIn.createAudioNodes = function(stream) {
 }
 
 ////////////////// vlmObj //////////////////////////////////
-// This object holds all the info regarding one instance of 
+// This object holds all the info regarding one instance of
 // a group that holds the spectrum, the midi and osc outputs
 
-var vlmObject = function(objectIndex) {
-    this.enabled = true;
+var vlmObject = function(objectIndex, state) {
+    state = state || {};
+    this.enabled = state.enabled || true;
     this.index = objectIndex;
     this.cssId = "#object" + vlmApp.padNum(this.index, 2);
 
     //Create html code for the new object
     this.createNewObjectHtml();
 
-    this.spectrum = new vlmSpectrum(this);
-    this.area = new vlmArea(this);
-    this.meter = new vlmMeter(this);
-    this.midi = new vlmMidi(this);
+    this.spectrum = new vlmSpectrum(this, state.spectrum);
+    this.area = new vlmArea(this, state.area);
+    this.meter = new vlmMeter(this, state.meter);
+    this.midi = new vlmMidi(this, state.midi);
 
-    this.disableOscFromWebVersion();
-    this.initGui();
+    this.disableOscFromWebVersion(state.osc);
+    this.initGui(state);
 }
 
-vlmObject.prototype.initGui = function() {
+vlmObject.prototype.initGui = function(state) {
+    state = state || {};
     $(this.cssId).find(".collapsible").collapse();
     $(this.cssId).find(".plusone").click(function() {
-        var newId = vlmApp.objects.length;        
+        var newId = vlmApp.objects.length;
         vlmApp.objects.push(new vlmObject(newId));
+        vlmApp.saveState();
     });
 }
 
-vlmObject.prototype.disableOscFromWebVersion = function() {
+vlmObject.prototype.disableOscFromWebVersion = function(state) {
     if (typeof require == "function") {
-        this.osc = new vlmOsc(this);
+        this.osc = new vlmOsc(this, state);
     } else {
         $(".oscContainer").hide();
         $(".oscInfoContainer").show();
@@ -183,7 +221,7 @@ vlmObject.prototype.createNewObjectHtml = function() {
     $("body").append('<div id="' + htmlId + '"></div>');
     $("#originalObject").contents().clone().appendTo(this.cssId);
     $(".plusone").hide();
-    $(this.cssId).find(".plusone").show(); 
+    $(this.cssId).find(".plusone").show();
     if (this.index == 0) {
         $(this.cssId).find("#close").hide();
     }
@@ -196,18 +234,22 @@ vlmObject.prototype.createNewObjectHtml = function() {
         //Hide all plus signs then show the last one
         $(".plusone").hide();
         var lastObjectCssId = "#object" + vlmApp.padNum(vlmApp.getLastEnabledObject(),2);
-        $(lastObjectCssId).find(".plusone").show(); 
+        $(lastObjectCssId).find(".plusone").show();
+        vlmApp.removeObject(thisObject.index);
     });
 }
 
 ////////////////// vlmSpectrum //////////////////////////
 
-var vlmSpectrum = function(containerObj) {
+var vlmSpectrum = function(containerObj, state) {
+    state = state || {};
     this.obj = containerObj;
-    this.width = 1000;
-    this.height = 200;
-    this.barWidth = 2;
-
+    this.width = state.width || 1000;
+    this.height = state.height || 200;
+    this.barWidth = state.barWidth || 2;
+    this.timeSmooth = state.timeSmooth || vlmApp.audioIn.timeSmooth;
+    this.zoom = state.zoom || 20;
+    vlmApp.audioIn.timeSmooth = this.timeSmooth;
     $(this.obj.cssId).find("#spectrumCanvas").attr("width", this.width);
     $(this.obj.cssId).find("#spectrumCanvas").attr("height", this.height);
     $(this.obj.cssId).find("#spectrumContainer").css("height", this.height);
@@ -224,10 +266,11 @@ var vlmSpectrum = function(containerObj) {
 
     this.canvasContext.fillStyle=this.gradient;
 
-    this.initGui();
+    this.initGui(state);
 }
 
-vlmSpectrum.prototype.initGui = function() {
+vlmSpectrum.prototype.initGui = function(state) {
+    state = state || {};
     var vlmSpectrumObj = this;
 
     var options = {
@@ -239,27 +282,28 @@ vlmSpectrum.prototype.initGui = function() {
         'fgColor': "#ffff00",
         'bgColor': "#222",
         'angleArc': 340,
-        'change' : function (v) { vlmSpectrumObj.barWidth = v/10 }
+        'change' : function (v) { vlmSpectrumObj.barWidth = v/10; vlmApp.saveState(); }
     };
 
     $(this.obj.cssId).find("#zoomBass .dial").knob(options);
     $(this.obj.cssId).find('#zoomBass .dial')
-    .val(20)
-    .trigger('change');
+        .val(this.zoom)
+        .trigger('change');
 
     options.min = 0.0;
     options.max = 1.0;
     options.step = 0.01;
-    options.change = function (v) { 
+    options.change = function (v) {
         vlmApp.audioIn.timeSmooth = v;
         //Link all 'smooth' dials because we can only have one smooth value
-        $('#smooth .dial').val(vlmApp.audioIn.timeSmooth).trigger('change');
+        $('#smooth .dial').val(this.timeSmooth).trigger('change');
+        vlmApp.saveState();
     }
 
     $(this.obj.cssId).find("#smooth .dial").knob(options);
     $(this.obj.cssId).find('#smooth .dial')
-    .val(vlmApp.audioIn.timeSmooth)
-    .trigger('change');
+        .val(state.timeSmooth || vlmApp.audioIn.timeSmooth)
+        .trigger('change');
 
 }
 
@@ -270,7 +314,7 @@ vlmSpectrum.prototype.getNormFromAnalyser = function(analyserValue) {
 vlmSpectrum.prototype.getYPosFromValue = function(analyserValue) {
     //Nomalize spectrum value
     var normV = this.getNormFromAnalyser(analyserValue);
-    
+
     //Calculate y position - the top of the spectrum bar
     return this.height - (normV * this.height);
 }
@@ -288,8 +332,8 @@ vlmSpectrum.prototype.drawSpectrum = function(array) {
 
         //Calculate the volumeter
         if (this.obj.area.barIsWithinArea(x, y, this.barWidth)) {
-                var add = this.obj.area.calculateAreaValue(y);
-                meterSum.push(add);
+            var add = this.obj.area.calculateAreaValue(y);
+            meterSum.push(add);
         }
 
         x += this.barWidth;
@@ -304,14 +348,19 @@ vlmSpectrum.prototype.drawSpectrum = function(array) {
 ////////////////// vlmArea //////////////////////////
 // The user selected area of the spectrum
 
-var vlmArea = function(containerObj) {
+var vlmArea = function(containerObj, state) {
+    state = state || {};
     this.obj = containerObj;
-    this.width = 400;
-    this.height = 100;
-    this.position = {top: 10,left: 0};
+    this.width = state.width || 400;
+    this.height = state.height || 100;
+    this.position = state.position || {top: 10,left: 0};
 
     var vlmAreaObj = this;
-
+    $(this.obj.cssId).find( "#vlmArea" ).css({
+        position: 'absolute',
+        top: this.position.top + 'px',
+        left: this.position.left + 'px'
+    });
     $(this.obj.cssId).find( "#vlmArea" ).width(vlmAreaObj.width);
     $(this.obj.cssId).find( "#vlmArea" ).height(vlmAreaObj.height);
 
@@ -321,12 +370,13 @@ var vlmArea = function(containerObj) {
         stop: function(event, ui) {
             var w = $(this).width();
             var h = $(this).height();
-            //console.log('w', w, "h", h); 
+            //console.log('w', w, "h", h);
             //Size excluding the border
             vlmAreaObj.width = w;
             vlmAreaObj.height = h;
             vlmAreaObj.position.left = ui.position.left;
             vlmAreaObj.position.top = ui.position.top;
+            vlmApp.saveState();
         }
     });
 
@@ -337,16 +387,17 @@ var vlmArea = function(containerObj) {
             //position relative to the container
             vlmAreaObj.position.left = ui.position.left;
             vlmAreaObj.position.top = ui.position.top;
+            vlmApp.saveState();
         }
-   });
+    });
 }
 
-// Note that we do not need to check if the spectrum bar is 
+// Note that we do not need to check if the spectrum bar is
 // sticking out above the top of the area, only that the bar is high enough
 // to stick into the area.
 vlmArea.prototype.barIsWithinArea = function(x, y, barWidth) {
     var areaBottom = this.position.top+this.height;
-    if (x >= this.position.left && 
+    if (x >= this.position.left &&
         x+barWidth <= this.position.left + this.width &&
         y <= areaBottom
     )
@@ -370,18 +421,19 @@ vlmArea.prototype.calculateAreaValue = function(spectrumBarY) {
 ////////////////// vlmMeter //////////////////////////
 // The output volume meter
 
-var vlmMeter = function(containerObj) {
+var vlmMeter = function(containerObj, state) {
+    state = state || {};
     this.obj = containerObj;
-    this.width = 25;
-    this.height = 200 -14;
-    this.normVol = 0; //Raw volume 0-1 range from the spectrum
-    this.amplifyValue = 1;
-    this.liftValue = 0.0;
-    this.outputVol = 0; //calculated with lift and amplify
+    this.width = state.width || 25;
+    this.height = state.height || 200 -14;
+    this.normVol = state.normVol || 0; //Raw volume 0-1 range from the spectrum
+    this.amplifyValue = state.amplifyValue || 1;
+    this.liftValue = state.liftValue || 0.0;
+    this.outputVol = state.outputVol || 0; //calculated with lift and amplify
 
     this.meterContext = $(this.obj.cssId).find("#meter").get()[0].getContext("2d");
     $(this.obj.cssId).find("#meter").attr("width", this.width);
-    $(this.obj.cssId).find("#meter").attr("height", this.height);    
+    $(this.obj.cssId).find("#meter").attr("height", this.height);
 
     this.gradient = this.meterContext.createLinearGradient(0,0,0,$(this.obj.cssId).find("#meter").attr("height"));
     this.gradient.addColorStop(0,'#aa0000');
@@ -389,10 +441,11 @@ var vlmMeter = function(containerObj) {
     this.gradient.addColorStop(0.75,'#ffff00');
     this.gradient.addColorStop(1,'#ffffff');
 
-    this.initGui();
+    this.initGui(state);
 }
 
-vlmMeter.prototype.initGui = function() {
+vlmMeter.prototype.initGui = function(state) {
+    state = state || {};
     var options = {
         'min': 0,
         'max': 7,
@@ -403,13 +456,13 @@ vlmMeter.prototype.initGui = function() {
         'bgColor': "#222",
         'angleArc': 340,
         'step': 0.01,
-       'change' : this.onAmplifyChange.bind(this)
+        'change' : this.onAmplifyChange.bind(this)
     };
 
     $(this.obj.cssId).find("#amplify .dial").knob(options);
     $(this.obj.cssId).find('#amplify .dial')
-    .val(this.amplifyValue)
-    .trigger('change');
+        .val(this.amplifyValue)
+        .trigger('change');
 
     options.min = 0;
     options.max = 1;
@@ -417,27 +470,29 @@ vlmMeter.prototype.initGui = function() {
 
     $(this.obj.cssId).find("#lift .dial").knob(options);
     $(this.obj.cssId).find('#lift .dial')
-    .val(this.liftValue)
-    .trigger('change');
+        .val(this.liftValue)
+        .trigger('change');
 }
 
 vlmMeter.prototype.onAmplifyChange = function(v) {
     this.amplifyValue = v;
+    vlmApp.saveState();
 }
 
 vlmMeter.prototype.onLiftChange = function(v) {
     this.liftValue = v;
+    vlmApp.saveState();
 }
 
 vlmMeter.prototype.calcVolume = function() {
     if( $(this.obj.cssId).find("#invert").is(':checked') )
     {
         this.outputVol = 1 - (this.amplifyValue * this.normVol) - this.liftValue;
-        this.outputVol = this.outputVol < 0 ? 0 : this.outputVol; //Cap value at 0       
-       
+        this.outputVol = this.outputVol < 0 ? 0 : this.outputVol; //Cap value at 0
+
     } else {
         this.outputVol = (this.amplifyValue * this.normVol) + this.liftValue;
-        this.outputVol = this.outputVol > 1 ? 1 : this.outputVol; //Cap value at 1        
+        this.outputVol = this.outputVol > 1 ? 1 : this.outputVol; //Cap value at 1
     }
 }
 
@@ -450,8 +505,8 @@ vlmMeter.prototype.drawVolumeter = function() {
 
     // set the fill style
     this.meterContext.fillStyle=this.obj.spectrum.gradient;
- 
- if( $(this.obj.cssId).find("#invert").is(':checked') )
+
+    if( $(this.obj.cssId).find("#invert").is(':checked') )
     {
         var bottom = this.height-(this.outputVol*this.height);
         this.meterContext.fillRect(0,0,this.width,bottom);
@@ -472,22 +527,23 @@ vlmMeter.prototype.drawVolumeter = function() {
 }
 
 //////////////////////////// Midi output //////////////////////////////////
-var vlmMidi = function(containerObj) {
+var vlmMidi = function(containerObj, state) {
+    state = state || {};
     this.obj = containerObj;
-    this.outPorts = ["No ports found. Connect an output and restart Volumetric"];
-    this.port = "";
-    this.CC = this.obj.index;
-    this.channel = 1
-    this.midiValue = 0;
-    this.port = 0;
-    this.midiSuccess = false;
+    this.outPorts = state.outPorts || ["No ports found. Connect an output and restart Volumetric"];
+    this.port = state.port || "";
+    this.CC = state.CC || this.obj.index;
+    this.channel = state.channel || 1;
+    this.midiValue = state.midiValue || 0;
+    this.port = state.port || 0;
+    this.midiSuccess = state.midiSuccess || false;
 
     this.openConnection();
     this.buildChannelDropdown();
     this.buildCCDropdown();
 
     $(this.obj.cssId).find("#midiPorts").css("width", "130px");
-    $(this.obj.cssId).find("#midiPorts").selectmenu();      
+    $(this.obj.cssId).find("#midiPorts").selectmenu();
 }
 
 //Triggered when midi connection is successful
@@ -496,9 +552,9 @@ vlmMidi.prototype.onMIDISuccess = function( midiAccess ) {
     this.outPorts = this.getOutputsList(midiAccess);
     this.updateDropdown();
     this.midiSuccess = true;
- }
+}
 
- vlmMidi.prototype.getOutputsList = function(midiAccess) {
+vlmMidi.prototype.getOutputsList = function(midiAccess) {
     var outputs=midiAccess.outputs.values();
     var returnOutputs = [];
     for ( var output = outputs.next(); output && !output.done; output = outputs.next()){
@@ -523,7 +579,7 @@ vlmMidi.prototype.updateDropdown = function() {
     var output = [];
     $.each(this.outPorts, function(key, value)
     {
-      output.push('<option value="'+ value.name +'">'+ value.name +'</option>');
+        output.push('<option value="'+ value.name +'">'+ value.name +'</option>');
     });
     $(this.obj.cssId).find('#midiPorts').html(output.join(''));
     $(this.obj.cssId).find('#midiPorts').val(0);
@@ -532,24 +588,26 @@ vlmMidi.prototype.updateDropdown = function() {
     $(this.obj.cssId).find( "#midiPorts").on( "selectmenuchange", function() {
         console.log("port change", $( this ).val());
         this.port = $( this ).val();
+        vlmApp.saveState();
     });
 }
 
 vlmMidi.prototype.buildChannelDropdown = function() {
     var vlmMidiObj = this;
-    
+
     var output = [];
     for (var i = 1; i<=16; i++) {
         output.push('<option value="'+ i +'">'+ i +'</option>');
     }
     $(this.obj.cssId).find('#midiChannels').html(output.join(''));
     $(this.obj.cssId).find("#midiChannels").css("width","50px");
-    $(this.obj.cssId).find("#midiChannels").selectmenu();      
+    $(this.obj.cssId).find("#midiChannels").selectmenu();
     $(this.obj.cssId).find("#midiChannels").val(this.channel);
     $(this.obj.cssId).find('#midiChannels').selectmenu("refresh");
 
     $(this.obj.cssId).find( "#midiChannels").on( "selectmenuchange", function() {
         vlmMidiObj.channel = parseInt($( this ).val());
+        vlmApp.saveState();
     });
 }
 
@@ -562,12 +620,13 @@ vlmMidi.prototype.buildCCDropdown = function() {
     }
     $(this.obj.cssId).find('#midiCCs').html(output.join(''));
     $(this.obj.cssId).find("#midiCCs").css("width","50px");
-    $(this.obj.cssId).find("#midiCCs").selectmenu();      
+    $(this.obj.cssId).find("#midiCCs").selectmenu();
     $(this.obj.cssId).find("#midiCCs").val(this.CC);
     $(this.obj.cssId).find('#midiCCs').selectmenu("refresh");
 
     $(this.obj.cssId).find( "#midiCCs").on( "selectmenuchange", function() {
         vlmMidiObj.CC = parseInt($( this ).val());
+        vlmApp.saveState();
     });
 }
 
@@ -587,13 +646,14 @@ vlmMidi.prototype.setMidiValue = function() {
 
 ////////////////////////////////////
 
-vlmOsc = function(containerObj) {
+vlmOsc = function(containerObj, state) {
+    state = state || {};
     this.obj = containerObj;
-    this.ip1 = "127.0.0.1";
-    this.port1 = "8000";
-    this.ip2 = "192.168.1.12";
-    this.port2 = "1234";
-    this.address = "/volumetric" + this.obj.index;
+    this.ip1 = state.ip1 || "127.0.0.1";
+    this.port1 = state.port1 || "8000";
+    this.ip2 = state.ip2 || "";
+    this.port2 = state.port2 || "";
+    this.address = state.address || "/volumetric" + this.obj.index;
     this.oscValue = 0;
 
     var vlmOscObj = this;
@@ -610,20 +670,25 @@ vlmOsc = function(containerObj) {
 
     $(this.obj.cssId).find("#oscIp1").change(function() {
         vlmOscObj.ip1 = $(this).val();
+        vlmApp.saveState();
     });
     $(this.obj.cssId).find("#oscIp2").change(function() {
         vlmOscObj.ip2 = $(this).val();
+        vlmApp.saveState();
     });
     $(this.obj.cssId).find("#oscPort1").change(function() {
         vlmOscObj.port1 = $(this).val();
+        vlmApp.saveState();
     });
     $(this.obj.cssId).find("#oscPort2").change(function() {
         vlmOscObj.port2 = $(this).val();
+        vlmApp.saveState();
     });
     $(this.obj.cssId).find("#oscAddress").change(function() {
         vlmOscObj.address = $(this).val();
+        vlmApp.saveState();
     });
-;}
+    ;}
 
 vlmOsc.prototype.setOscValue = function() {
     this.oscValue = this.obj.meter.outputVol;
@@ -637,7 +702,11 @@ vlmOsc.prototype.sendMessage = function() {
         address: this.address,
         args: [this.oscValue]
     });
-    this.udpMod.send(buf, 0, buf.length, this.port1, this.ip1);
-    this.udpMod.send(buf, 0, buf.length, this.port2, this.ip2);
-}
 
+    if (this.ip1 && this.ip1 !== "" && this.port1 && this.port1 !== "") {
+        this.udpMod.send(buf, 0, buf.length, this.port1, this.ip1);
+    }
+    if (this.ip2 && this.ip2 !== "" && this.port2 && this.port2 !== "") {
+        this.udpMod.send(buf, 0, buf.length, this.port2, this.ip2);
+    }
+}

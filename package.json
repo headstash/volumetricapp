@@ -2,6 +2,9 @@
   "name": "Volumetric",
   "main": "index.html",
   "chromium-args": "--enable-web-midi --enable-web-audio --allow-file-access-from-files",
+  "scripts": {
+    "start": "nw .":q~
+  },
   "webkit": {
     "plugin": true,
     "node-remote": ""
