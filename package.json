@@ -3,7 +3,7 @@
   "main": "index.html",
   "chromium-args": "--enable-web-midi --enable-web-audio --allow-file-access-from-files",
   "scripts": {
-    "start": "nw .":q~
+    "start": "nw ."
   },
   "webkit": {
     "plugin": true,
