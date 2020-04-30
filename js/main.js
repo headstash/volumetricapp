@@ -4,22 +4,26 @@
 //localstorage save state
 // Don't delete object, just disable it? the midi, the osc, the drawing of the spectrum
 
+console = console || {};
+console.log = console.log || function() {};
+console.error = console.error || function() {};
+
 var vlmApp = {};
 
 vlmApp.init = function() {
     this.includeJavascript();
     this.audioIn.init();
-
     this.objects = [];
+
+    let objects = [];
     try {
-        var objects = localStorage && localStorage.getItem('objects');
+        objects = localStorage && localStorage.getItem('objects');
         if (typeof objects === 'string') {
             objects = JSON.parse(objects);
         }
     } catch (e) {
         console.error('Invalid JSON: ' + objects);
     }
-    console.log(objects);
     if (objects.length === 0) {
         this.objects.push(new vlmObject(0));
     } else {
