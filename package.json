@@ -12,8 +12,12 @@
   "window": {
     "frame": true,
     "toolbar": true,
-    "width":1128,
-    "height":550,
+    "width": 1128,
+    "height": 550,
     "name": "index"
+  },
+  "dependencies": {
+    "osc-min": "^1.1.2",
+    "nw": "^0.48.1"
   }
 }

@@ -17,7 +17,7 @@ vlmApp.init = function() {
 
     let objects = [];
     try {
-        objects = localStorage && localStorage.getItem('objects');
+        objects = (localStorage && localStorage.getItem('objects')) || [];
         if (typeof objects === 'string') {
             objects = JSON.parse(objects);
         }
